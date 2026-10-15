@@ -116,6 +116,8 @@ async function boot() {
   (window as any).__screens = screens;
 }
 
+if (import.meta.env.DEV) import('./dev');
+
 boot().catch(e => {
   console.error(e);
   const sub = document.querySelector('.boot-sub');

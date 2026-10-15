@@ -40,11 +40,11 @@ const terrainFS = /* glsl */ `
     #include <logdepthbuf_fragment>
     vec3 base = uHasMap > 0.5 ? texture2D(map, vUv).rgb : vec3(0.34, 0.37, 0.3);
     // Sentinel-2 cloudless is fairly dark/saturated: gentle tone mapping
-    base = pow(base, vec3(0.92)) * 1.06;
+    base = pow(base, vec3(1.04)) * 0.97;
     vec3 n = normalize(vNormal);
     float diff = max(dot(n, uSunDir), 0.0);
     float relief = 0.55 + 0.6 * diff;           // imagery already contains shading → mild relief
-    vec3 col = base * (uAmbient * 0.75 + uSunColor * relief * 0.55);
+    vec3 col = base * (uAmbient * 0.68 + uSunColor * relief * 0.5);
     float w = smoothstep(0.35, 0.75, vWater);
     if (w > 0.0) {
       vec2 p = vWorld.xz;

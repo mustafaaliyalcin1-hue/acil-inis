@@ -5,6 +5,7 @@ import { atmosphere, clamp, DEG, KT, FT, approach, lerp, smooth } from '../core/
 import type { AircraftType } from './aircraftData';
 import type { Weather } from '../world/weather';
 import type { World } from '../world/world';
+import { insideObstacle } from '../world/airports';
 
 export interface Engine { n1: number; failed: boolean; fire: boolean; fireT: number; damaged: number; out: boolean; extinguished: boolean; thrust: number; ff: number }
 export interface FlightEvents { emit(type: string, data?: any): void }
@@ -425,7 +426,7 @@ export class Aircraft {
       // obstacle (building) strikes for wingtips / fuselage
       if (!isGear && this.vel.length() > 8) {
         for (const o of this.world.obstacles(P.x, P.z, 2)) {
-          if (P.x > o.min.x && P.x < o.max.x && P.z > o.min.z && P.z < o.max.z && P.y < o.max.y && P.y > o.min.y - 1) {
+          if (insideObstacle(o, P.x, P.y, P.z)) {
             if (ct.kind === 'tip') this.breakWing(ct.side, 'bina');
             else if (ct.kind !== 'eng') this.crash('Binaya çarpma');
             else this.damageEngine(ct.idx - 12, 1);
@@ -514,7 +515,7 @@ export class Aircraft {
     const v = vP.length();
     const planing = 0.5 * rho * A * 0.04 * Math.max(0, -vP.y) * v;
     const fWorld = new THREE.Vector3(0, buoy + planing, 0);
-    const cd = isGear ? 1.2 : ct.kind === 'eng' ? 0.9 : ct.kind === 'tip' ? 0.15 : 0.06;
+    const cd = isGear ? 0.5 : ct.kind === 'eng' ? 0.22 : ct.kind === 'tip' ? 0.03 : 0.011;
     if (v > 0.1) fWorld.addScaledVector(vP, -0.5 * rho * cd * A * Math.min(1, d / 0.6) * v / Math.max(1, Math.sqrt(t.mtow / 50000)));
     const fB = fWorld.applyQuaternion(qInv);
     F.add(fB); M.add(new THREE.Vector3().crossVectors(ct.p, fB));
@@ -522,6 +523,7 @@ export class Aircraft {
     if (this.sys.invincible) return;
     if (ct.kind === 'belly' && ct.idx === 3 && depth > t.dia * 0.8 && this.gs > 70) this.crash('Burun suya gömüldü');
     if (vn > 9) this.crash('Suya çok sert çarpma');
+    if (this.peakDecel > 9.5) this.crash('Suya çarpmada aşırı yavaşlama');
   }
 
   private onTouchdown(vn: number, flat: boolean, belly = false, water = false) {

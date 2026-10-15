@@ -15,7 +15,14 @@ export interface Airport {
   runways: Runway[]; x: number; z: number; built: boolean; group?: THREE.Group; obstacles: Obstacle[]; elevReady: boolean;
   tower?: THREE.Vector3;
 }
-export interface Obstacle { min: THREE.Vector3; max: THREE.Vector3; kind: string }
+/** oriented box: centre, half extents along the box's local axes, rotation about Y, vertical span */
+export interface Obstacle { cx: number; cz: number; hx: number; hz: number; rot: number; y0: number; y1: number; r: number; kind: string }
+export function insideObstacle(o: Obstacle, x: number, y: number, z: number, pad = 0) {
+  if (y < o.y0 - pad || y > o.y1 + pad) return false;
+  const dx = x - o.cx, dz = z - o.cz, c = Math.cos(o.rot), s = Math.sin(o.rot);
+  const lx = dx * c - dz * s, lz = dx * s + dz * c;
+  return Math.abs(lx) <= o.hx + pad && Math.abs(lz) <= o.hz + pad;
+}
 type RawRwy = [string, string, number, number, number, number, number, number, number, number, number];
 type RawApt = [string, string, number, number, number, number, RawRwy[], string, string];
 
@@ -198,7 +205,7 @@ const runwayFS = /* glsl */ `
     #include <logdepthbuf_fragment>
     float a = vRw.x, c = vRw.y, hw = uW * 0.5;
     vec2 w = vec2(fwidth(a), fwidth(c)) * 0.75 + 0.02;
-    vec3 asphalt = mix(vec3(0.105, 0.11, 0.115), vec3(0.42, 0.42, 0.40), uConcrete);
+    vec3 asphalt = mix(vec3(0.1, 0.105, 0.11), vec3(0.33, 0.33, 0.32), uConcrete);
     float n = noise(vec2(a, c) * 0.6) * 0.5 + noise(vec2(a, c) * 3.1) * 0.3 + noise(vec2(a * 0.05, c * 0.4)) * 0.4;
     vec3 col = asphalt * (0.82 + 0.3 * n);
     float paint = 0.0; vec3 paintCol = vec3(0.92);
@@ -351,7 +358,7 @@ function strip(x0: number, z0: number, ax: number, az: number, L: number, W: num
       pos.push(x0 + ax * a + px * c, y, z0 + az * a + pz * c);
       rw.push(a, c);
     }
-    if (i < n) { const k = i * 2; idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); }
+    if (i < n) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -423,7 +430,7 @@ function designator(ident: string, thrX: number, thrZ: number, ux: number, uz: n
     // reading upright from the approach: bottom of glyph nearest threshold
     const pts: [number, number, number, number][] = [[a, c - gw / 2, u0, 0], [a, c + gw / 2, u1, 0], [a + gh, c + gw / 2, u1, 1], [a + gh, c - gw / 2, u0, 1]];
     for (const [aa, cc, uu, vv] of pts) { pos.push(thrX + ux * aa + px * cc, y, thrZ + uz * aa + pz * cc); uv.push(uu, vv); }
-    idx.push(k, k + 2, k + 1, k, k + 3, k + 2);
+    idx.push(k, k + 1, k + 2, k, k + 2, k + 3);
   };
   const scale = clamp(W / 45, 0.6, 1.2);
   if (num.length === 2) { quad(num[0], along, -2.6 * scale); quad(num[1], along, 2.6 * scale); }
@@ -510,7 +517,6 @@ export function buildAirport(apt: Airport): THREE.Group {
           if (a === 300) for (let q = -7; q <= 7; q++) if (Math.abs(q) > 2) L.add(bx + px * q * 2.2, y + 3.3, bz + pz * q * 2.2, WHITE, WHITE, 2.2, -ux, -uz, 2);
           if (a >= 330) L.add(bx, y + 2.0 + a * 0.006, bz, [1, 1, 1], null, 5, -ux, -uz, 2, 0, (900 - a) / 600);
         }
-        apt.obstacles.push({ min: new THREE.Vector3(Math.min(tx, tx - ux * 900) - 3, y, Math.min(tz, tz - uz * 900) - 3), max: new THREE.Vector3(Math.max(tx, tx - ux * 900) + 3, y + 7, Math.max(tz, tz - uz * 900) + 3), kind: 'als' });
       }
     }
 
@@ -584,9 +590,8 @@ export function buildAirport(apt: Airport): THREE.Group {
 }
 
 function aabbOf(cx: number, cz: number, y: number, sx: number, sy: number, sz: number, rot: number, kind: string): Obstacle {
-  const c = Math.abs(Math.cos(rot)), s = Math.abs(Math.sin(rot));
-  const ex = (sx * c + sz * s) / 2, ez = (sx * s + sz * c) / 2;
-  return { min: new THREE.Vector3(cx - ex, y, cz - ez), max: new THREE.Vector3(cx + ex, y + sy, cz + ez), kind };
+  // BoxGeometry(sx, sy, sz).rotateY(rot): world = R(rot)·local → local = R(-rot)·world
+  return { cx, cz, hx: sx / 2, hz: sz / 2, rot, y0: y, y1: y + sy, r: Math.hypot(sx, sz) / 2, kind };
 }
 function hashStr(s: string) { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
 export function mulberry(a: number) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }

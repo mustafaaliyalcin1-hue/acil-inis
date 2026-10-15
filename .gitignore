@@ -5,3 +5,4 @@ pack-out
 pack-cache
 *.log
 public/pack
+preview-root

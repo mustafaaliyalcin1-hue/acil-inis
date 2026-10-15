@@ -124,7 +124,7 @@ export class World {
     const out: Obstacle[] = [];
     for (const a of this.active.values()) {
       if (Math.abs(a.x - x) > 8000 || Math.abs(a.z - z) > 8000) continue;
-      for (const o of a.obstacles) if (x > o.min.x - r && x < o.max.x + r && z > o.min.z - r && z < o.max.z + r) out.push(o);
+      for (const o of a.obstacles) if (Math.abs(x - o.cx) < o.r + r && Math.abs(z - o.cz) < o.r + r) out.push(o);
     }
     return out;
   }
