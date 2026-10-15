@@ -80,6 +80,7 @@ export class Game {
     hudHost.appendChild(this.overlay);
     this.hud = new Hud(hudHost);
     this.controls = new Controls(hudHost);
+    this.controls.onKeyAction = a => { if (!this.ac) return; if (a === 'pause') this.onPause?.(); else this.overlay.querySelector<HTMLButtonElement>(`[data-a="${a}"]`)?.click(); };
     this.buildOverlay();
     this.setHudVisible(false);
     addEventListener('resize', () => this.resize());

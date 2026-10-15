@@ -369,6 +369,8 @@ export class Screens {
     };
     saveRow.querySelector<HTMLButtonElement>('#rst')!.onclick = () => { if (confirm('Tüm ayarlar, skorlar ve kariyer silinsin mi?')) { store.reset(); this.settings(back); } };
     field('Kayıt (ayarlar, skorlar, kariyer)', saveRow, c2);
+    c2.appendChild(h(`<div class="sec">PC klavye kontrolleri</div>`));
+    c2.appendChild(h(`<div style="font-size:12px;color:var(--muted);line-height:1.6">Ok tuşları / WASD: yunuslama ve yatış (↓ = burun yukarı) · Q/E: dümen · PageUp/PageDown veya +/−: gaz · Home: TOGA · End: rölanti<br>F / V: flap aç / topla · G: iniş takımı · Boşluk veya B: fren · K: park freni · R: ters itki · / : spoiler · . : spoiler ARM<br>T / Y: trim · C: kamera · H: HUD · Esc / P: duraklat · Fare sürükle: kamera döndür · Tekerlek: yakınlaş</div>`));
     c2.appendChild(h(`<div class="sec">Veri kaynakları ve atıflar</div>`));
     c2.appendChild(h(`<div style="font-size:12px;color:var(--muted);line-height:1.5">
       Uydu görüntüsü: Sentinel-2 cloudless 2024 — s2maps.eu, EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2024), CC BY-NC-SA 4.0<br>

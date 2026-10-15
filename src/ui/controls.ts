@@ -31,11 +31,67 @@ export class Controls {
   constructor(host: HTMLElement) {
     host.appendChild(this.root);
     this.build();
+    this.setupKeyboard();
     addEventListener('deviceorientation', ev => {
       const e = ev as DeviceOrientationEvent;
       if (e.beta == null || e.gamma == null) return;
       this.tilt.beta = e.beta; this.tilt.gamma = e.gamma; this.tilt.ok = true;
     });
+  }
+
+  // ---------------- PC keyboard
+  private keys = new Set<string>();
+  private kAxis = { x: 0, y: 0, r: 0 };
+  onKeyAction: (a: string) => void = () => {};
+  private setupKeyboard() {
+    const isTouch = matchMedia('(pointer: coarse)').matches;
+    if (!isTouch) { this.stick.style.display = 'none'; this.rud.style.display = 'none'; }
+    window.addEventListener('keydown', e => {
+      if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'SELECT') return;
+      const k = e.key.toLowerCase();
+      if (!e.repeat) this.discrete(k, e.shiftKey);
+      this.keys.add(k);
+      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'pageup', 'pagedown'].includes(k)) e.preventDefault();
+    });
+    window.addEventListener('keyup', e => {
+      const k = e.key.toLowerCase(); this.keys.delete(k);
+      if ((k === 'b' || k === ' ') && this.ac) this.ac.ctl.brakes = 0;
+    });
+    addEventListener('blur', () => this.keys.clear());
+  }
+  private discrete(k: string, shift: boolean) {
+    const ac = this.ac;
+    if (k === 'c') return this.onKeyAction('cam');
+    if (k === 'escape' || k === 'p') return this.onKeyAction('pause');
+    if (k === 'h') return this.onKeyAction('hud');
+    if (!ac) return;
+    const n = ac.flapCount;
+    if (k === 'f') ac.ctl.flapIdx = Math.min(n - 1, ac.ctl.flapIdx + 1);
+    if (k === 'v') ac.ctl.flapIdx = Math.max(0, ac.ctl.flapIdx - 1);
+    if (k === 'g') ac.ctl.gearDown = !ac.ctl.gearDown;
+    if (k === 'r') ac.ctl.reverse = !ac.ctl.reverse;
+    if (k === '/' || k === '.') {
+      if (shift || k === '.') { ac.ctl.spoilerArmed = !ac.ctl.spoilerArmed; ac.ctl.spoiler = 0; }
+      else { ac.ctl.spoiler = ac.ctl.spoiler > 0 ? 0 : 1; ac.ctl.spoilerArmed = false; }
+    }
+    if (k === 'k') ac.ctl.parkBrake = !ac.ctl.parkBrake;
+    if (k === 'b' || k === ' ') ac.ctl.brakes = 1;
+    if (k === 'f1' || k === 'end') ac.ctl.throttle.fill(0);
+    if (k === 'f4' || k === 'home') ac.ctl.throttle.fill(1);
+  }
+  private keyboard(dt: number): boolean {
+    const K = this.keys, ac = this.ac!;
+    const has = (...k: string[]) => k.some(x => K.has(x));
+    const tx = (has('arrowright', 'd') ? 1 : 0) - (has('arrowleft', 'a') ? 1 : 0);
+    const ty = (has('arrowdown', 's') ? 1 : 0) - (has('arrowup', 'w') ? 1 : 0); // down arrow = pull (nose up)
+    const tr = (has('e', 'x') ? 1 : 0) - (has('q', 'z') ? 1 : 0);
+    const ease = (v: number, t: number, up: number) => t ? clamp(v + Math.sign(t - v) * up * dt, -1, 1) : v - v * Math.min(1, dt * 6);
+    this.kAxis.x = ease(this.kAxis.x, tx * 0.8, 2.5); this.kAxis.y = ease(this.kAxis.y, ty * 0.7, 2.0); this.kAxis.r = ease(this.kAxis.r, tr, 2.5);
+    const thrUp = has('pageup', '=', '+', 'shift'), thrDn = has('pagedown', '-', 'control');
+    if (thrUp || thrDn) { const d = (thrUp ? 1 : -1) * dt * 0.45; for (let i = 0; i < ac.ctl.throttle.length; i++) ac.ctl.throttle[i] = clamp(ac.ctl.throttle[i] + d, 0, 1); }
+    if (has('t')) ac.ctl.trim = clamp(ac.ctl.trim + dt * 0.12, -1, 1);
+    if (has('y')) ac.ctl.trim = clamp(ac.ctl.trim - dt * 0.12, -1, 1);
+    return Math.abs(this.kAxis.x) > 0.01 || Math.abs(this.kAxis.y) > 0.01 || Math.abs(this.kAxis.r) > 0.01;
   }
 
   static async requestTilt(): Promise<boolean> {
@@ -157,9 +213,10 @@ export class Controls {
     } else this.stick.style.opacity = '1';
     const sens = s.control === 'tilt' ? s.tiltSens : s.stickSens;
     const curve = (v: number) => Math.sign(v) * Math.pow(Math.abs(v), 1.6) * sens;
-    ac.ctl.roll = clamp(curve(px), -1, 1);
-    ac.ctl.pitch = clamp(curve(s.invertPitch ? -py : py), -1, 1); // pull (down on stick) = nose up
-    ac.ctl.yaw = this.rudder;
+    const kb = this.keyboard(dt);
+    ac.ctl.roll = clamp(curve(px) + (kb ? this.kAxis.x : 0), -1, 1);
+    ac.ctl.pitch = clamp(curve(s.invertPitch ? -py : py) + (kb ? (s.invertPitch ? -this.kAxis.y : this.kAxis.y) : 0), -1, 1); // pull (down on stick) = nose up
+    ac.ctl.yaw = clamp(this.rudder + this.kAxis.r, -1, 1);
     const td = (this as any).trimDir?.() ?? 0;
     if (td) ac.ctl.trim = clamp(ac.ctl.trim + td * dt * 0.12, -1, 1);
     // reflect lever states
@@ -177,6 +234,5 @@ export class Controls {
     this.gearHandle.style.background = ac.gearPos > 0.99 ? 'radial-gradient(circle at 40% 35%, #b8ffc8, #3c9)' : ac.gearPos > 0.01 ? 'radial-gradient(circle at 40% 35%, #ffd0d0, #e44)' : '';
     this.btns.rev.classList.toggle('on', ac.ctl.reverse);
     this.btns.park.classList.toggle('on', ac.ctl.parkBrake);
-    this.rud.style.display = '';
   }
 }
