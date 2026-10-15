@@ -1,0 +1,7 @@
+node_modules
+dist
+data-raw
+pack-out
+pack-cache
+*.log
+public/pack

@@ -1,0 +1,53 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PACK_TAG: pack-marmara-v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build app (base = /<repo>/)
+        run: npx tsc --noEmit && npx vite build
+        env:
+          BASE: /${{ github.event.repository.name }}/
+      - name: Offline world pack (pre-built, SHA-256 verified chunks from the release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist/pack
+          gh release download "$PACK_TAG" --dir dist/pack --repo "${{ github.repository }}"
+          node -e "const m=require('./dist/pack/manifest.json');const fs=require('fs');const c=require('crypto');for(const f of [m.index,...m.chunks]){const b=fs.readFileSync('dist/pack/'+f.file);if(b.length!==f.size||c.createHash('sha256').update(b).digest('hex')!==f.sha256)throw new Error('bad '+f.file)}console.log('pack ok',(m.totalSize/1e6).toFixed(1),'MB')"
+          touch dist/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
