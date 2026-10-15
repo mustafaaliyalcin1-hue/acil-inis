@@ -17,6 +17,7 @@ export class Hud {
   ils: IlsState | null = null;
   target: { lat: number; lon: number; name: string } | null = null;
   glideRing = false;
+  fma = ''; fmaSel = '';
   private dpr = Math.min(2, devicePixelRatio || 1);
   private frame = 0;
   constructor(host: HTMLElement) {
@@ -27,18 +28,32 @@ export class Hud {
     this.layout();
     addEventListener('resize', () => this.layout());
   }
+  /** fit PFD + ND (+ engine strip) into the free strip between the touch stick (left) and the levers (right) */
   layout() {
     const s = store.settings.hudScale;
-    const H = innerHeight;
-    const size = Math.round(Math.min(190, H * 0.46) * s);
-    const set = (c: HTMLCanvasElement, w: number, h: number, left: string) => {
-      c.style.width = w + 'px'; c.style.height = h + 'px'; c.style.left = left;
+    const W = innerWidth, H = innerHeight;
+    const vis = (sel: string) => { const e = document.querySelector<HTMLElement>(sel); const r = e?.getBoundingClientRect(); return r && r.width > 0 && e!.offsetParent !== null ? r : null; };
+    const stick = vis('.stick'), rud = vis('.rudder'), lev = vis('.levers');
+    let left = 8, right = W - 8;
+    if (stick) left = Math.max(left, stick.right + 6);
+    if (rud && rud.bottom > H - 200) left = Math.max(left, rud.right + 6);
+    if (lev) right = Math.min(right, lev.left - 6);
+    if (right - left < 260) { left = 8; right = lev ? lev.left - 6 : W - 8; } // controls hidden (HUD toggle) or tiny screen
+    const avail = right - left;
+    let size = Math.round(Math.min(190, H * 0.46) * s);
+    const engBeside = avail >= size * 2.18 + 8 + size * 0.62 + 10;
+    size = Math.max(90, Math.min(size, Math.floor((avail - 8) / 2.18)));
+    const pw = Math.round(size * 1.18), mid = Math.round(left + (avail - (engBeside ? size * 0.62 + 10 : 0)) / 2);
+    const set = (c: HTMLCanvasElement, w: number, h: number, l: number) => {
+      c.style.width = w + 'px'; c.style.height = h + 'px'; c.style.left = l + 'px';
       c.width = Math.round(w * this.dpr); c.height = Math.round(h * this.dpr);
     };
-    set(this.pfd, Math.round(size * 1.18), size, `calc(50% - ${Math.round(size * 1.18) + 4}px)`);
-    set(this.nd, size, size, 'calc(50% + 4px)');
-    set(this.eng, Math.round(size * 0.62), Math.round(size * 0.62), `calc(50% + ${size + 10}px)`);
-    this.eng.style.bottom = `calc(6px + var(--sab))`;
+    set(this.pfd, pw, size, mid - pw - 4);
+    set(this.nd, size, size, mid + 4);
+    const es = Math.round(size * (engBeside ? 0.62 : 0.56));
+    set(this.eng, es, es, engBeside ? mid + size + 10 : W - es - 44);
+    if (engBeside) { this.eng.style.bottom = `calc(6px + var(--sab))`; this.eng.style.top = ''; this.eng.style.right = ''; }
+    else { this.eng.style.bottom = 'auto'; this.eng.style.top = `calc(6px + var(--sat))`; this.eng.style.left = ''; this.eng.style.right = `calc(44px + var(--sar))`; }
   }
   setVisible(v: boolean) { this.root.style.display = v ? '' : 'none'; }
 
@@ -123,7 +138,7 @@ export class Hud {
       g.beginPath(); g.moveTo(lx, cy + R * 1.08 - 6); g.lineTo(lx + 6, cy + R * 1.08); g.lineTo(lx, cy + R * 1.08 + 6); g.lineTo(lx - 6, cy + R * 1.08); g.fill();
       g.beginPath(); g.moveTo(cx + R * 1.08 - 6, gy); g.lineTo(cx + R * 1.08, gy - 6); g.lineTo(cx + R * 1.08 + 6, gy); g.lineTo(cx + R * 1.08, gy + 6); g.fill();
       g.font = `${Math.round(H * 0.055)}px monospace`; g.fillStyle = '#ff4fd8'; g.textAlign = 'left';
-      g.fillText(`ILS ${this.ils.apt} ${this.ils.ident} ${(this.ils.dist / NM).toFixed(1)}NM`, 4, H * 0.06);
+      g.fillText(`ILS ${this.ils.apt} ${this.ils.ident} ${(this.ils.dist / NM).toFixed(1)}NM`, 4, H * 0.13);
     }
     // ---- speed tape
     const tw = W * 0.17, tx = 2;
@@ -201,7 +216,8 @@ export class Hud {
     g.font = `${Math.round(H * 0.05)}px monospace`; g.textAlign = 'center';
     const law = ac.t.fbw ? (ac.law === 'normal' ? 'NORMAL LAW' : ac.law === 'alternate' ? 'ALTN LAW' : 'DIRECT LAW') : ac.easy ? 'KOLAY ASİST' : 'MANUAL';
     g.fillStyle = ac.law === 'normal' || !ac.t.fbw ? '#3cf27a' : '#ffb000';
-    g.fillText(law, cx, 10);
+    if (this.fma) { g.fillStyle = '#3cf27a'; g.fillText(this.fma, cx, 10); g.fillStyle = '#46d6ff'; g.fillText(this.fmaSel, cx, H - 4 - H * 0.16); }
+    else g.fillText(law, cx, 10);
   }
 
   private drawStandby(ac: Aircraft) {

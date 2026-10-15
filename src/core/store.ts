@@ -8,7 +8,7 @@ export interface Settings {
   tiltSens: number;
   stickSens: number;
   invertPitch: boolean;
-  difficulty: 'real' | 'easy';
+  difficulty: 'real' | 'easy' | 'hard';
   volume: number;
   voice: boolean;
   units: 'aviation';
@@ -18,6 +18,7 @@ export interface Settings {
   googleKey: string;
   showGlideRing: boolean;
   tutorialDone: boolean;
+  buildings: boolean;
 }
 export interface ScoreEntry { id: string; stars: number; saved: number; total: number; vs: number; site: string; at: number; aircraft: string }
 export interface OwnedPlane { id: string; type: string; condition: number; fuelKg: number; at: string; hours: number }
@@ -27,7 +28,7 @@ export interface SaveData { v: 1; settings: Settings; scores: Record<string, Sco
 export const defaultSettings = (): Settings => ({
   quality: 'auto', control: 'joystick', tiltSens: 1, stickSens: 1, invertPitch: false, difficulty: 'real',
   volume: 0.8, voice: true, units: 'aviation', hudScale: 1, tiltCal: null, worldMode: 'offline', googleKey: '',
-  showGlideRing: true, tutorialDone: false
+  showGlideRing: true, tutorialDone: false, buildings: true
 });
 
 let data: SaveData = load();

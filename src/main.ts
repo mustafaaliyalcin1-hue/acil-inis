@@ -12,9 +12,39 @@ import { FT } from './core/geo';
 // --- iOS: no zoom / pinch / double-tap / pull-to-refresh
 for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault(), { passive: false } as any);
 document.addEventListener('touchmove', e => { if (!(e.target as HTMLElement).closest('.scr-body, .admin')) e.preventDefault(); }, { passive: false });
-let lastTouch = 0;
-document.addEventListener('touchend', e => { const n = Date.now(); if (n - lastTouch < 300) e.preventDefault(); lastTouch = n; }, { passive: false });
+// (double-tap zoom is already blocked by `touch-action: none` on body; a touchend blocker here used to eat fast taps)
 document.addEventListener('contextmenu', e => e.preventDefault());
+
+// --- reliable touch taps: iOS drops `click` when another finger is down (stick/throttle held) and adds latency,
+// so a touch tap on a button fires click() itself on pointerup and the late native click is swallowed.
+{
+  let tapEl: HTMLElement | null = null, tapId = -1, sx = 0, sy = 0;
+  let swallowEl: HTMLElement | null = null, swallowUntil = 0;
+  const target = (e: Event) => (e.target as HTMLElement | null)?.closest?.('button, .tap') as HTMLElement | null;
+  document.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse') return;
+    const b = target(e); if (!b || (b as HTMLButtonElement).disabled) return;
+    tapEl = b; tapId = e.pointerId; sx = e.clientX; sy = e.clientY;
+  }, true);
+  document.addEventListener('pointermove', e => {
+    if (e.pointerId === tapId && Math.hypot(e.clientX - sx, e.clientY - sy) > 14) tapEl = null;
+  }, true);
+  document.addEventListener('pointercancel', e => { if (e.pointerId === tapId) tapEl = null; }, true);
+  document.addEventListener('pointerup', e => {
+    if (e.pointerId !== tapId || !tapEl) return;
+    const b = tapEl; tapEl = null; tapId = -1;
+    const r = b.getBoundingClientRect(), pad = 12;
+    if (e.clientX < r.left - pad || e.clientX > r.right + pad || e.clientY < r.top - pad || e.clientY > r.bottom + pad) return;
+    swallowEl = b; swallowUntil = performance.now() + 700;
+    b.click();
+  }, true);
+  document.addEventListener('click', e => {
+    if (!e.isTrusted || !swallowEl || performance.now() > swallowUntil) return;
+    // swallow whatever the late native click hits — the screen may have changed under the finger (ghost click)
+    if ((e.target as HTMLElement | null)?.closest?.('input, select, textarea, label')) return;
+    e.stopImmediatePropagation(); e.preventDefault(); swallowEl = null;
+  }, true);
+}
 try { (screen.orientation as any)?.lock?.('landscape').catch(() => {}); } catch { /* not supported on iOS */ }
 
 const updateSW = registerSW({ immediate: true, onOfflineReady() { (window as any).__swReady = true; } });

@@ -8,6 +8,7 @@ import { buildModel, PlaneModel } from '../sim/model';
 import { Particles, Debris } from '../sim/particles';
 import { Controls } from '../ui/controls';
 import { Hud } from '../ui/hud';
+import { Autopilot } from '../sim/autopilot';
 import { audio } from '../audio/audio';
 import { store } from '../core/store';
 import { FT, KT, DEG, clamp, destination, wrap180, atmosphere, lerp, NM, haversine } from '../core/geo';
@@ -42,6 +43,8 @@ export class Game {
   smoke: Particles; glow: Particles;
   debris: Debris[] = [];
   controls: Controls; hud: Hud;
+  ap = new Autopilot();
+  private apPanel!: HTMLElement;
   session: Session | null = null;
   overlay = document.createElement('div');
   camMode: CamMode = 'chase';
@@ -58,6 +61,7 @@ export class Game {
   private ended = false;
   private onWarnings: string[] = [];
   private msgTimer = 0;
+  private frameCount = 0;
   private towerPos = new THREE.Vector3();
   replay: { t: number; p: number[]; q: number[]; g: number; f: number }[] = [];
   private replayTimer = 0;
@@ -80,7 +84,7 @@ export class Game {
     hudHost.appendChild(this.overlay);
     this.hud = new Hud(hudHost);
     this.controls = new Controls(hudHost);
-    this.controls.onKeyAction = a => { if (!this.ac) return; if (a === 'pause') this.onPause?.(); else this.overlay.querySelector<HTMLButtonElement>(`[data-a="${a}"]`)?.click(); };
+    this.controls.onKeyAction = a => { if (!this.ac) return; if (a === 'pause') this.onPause?.(); else if (a.startsWith('fcu:')) this.fcuAct(a.slice(4), false); else this.overlay.querySelector<HTMLButtonElement>(`[data-a="${a}"]`)?.click(); };
     this.buildOverlay();
     this.setHudVisible(false);
     addEventListener('resize', () => this.resize());
@@ -121,6 +125,14 @@ export class Game {
         <button class="hbtn ia" data-a="cam">🎥 Takip</button>
         <button class="hbtn ia" data-a="hud">HUD</button>
         <button class="hbtn ia" data-a="slow">1×</button>
+        <button class="hbtn ia ap-btn" data-a="ap">AP</button>
+      </div>
+      <div class="fcu ia" style="display:none">
+        <div class="fcu-row"><button data-f="ap">AP1</button><button data-f="athr">A/THR</button><button data-f="app">APP</button></div>
+        <div class="fcu-row"><span>HDG</span><button data-f="hdg-" data-r>◀</button><b data-v="hdg">---</b><button data-f="hdg+" data-r>▶</button></div>
+        <div class="fcu-row"><span>ALT</span><button data-f="alt-" data-r>◀</button><b data-v="alt">---</b><button data-f="alt+" data-r>▶</button></div>
+        <div class="fcu-row"><span>V/S</span><button data-f="vs-" data-r>◀</button><b data-v="vs">---</b><button data-f="vs+" data-r>▶</button></div>
+        <div class="fcu-row"><span>SPD</span><button data-f="spd-" data-r>◀</button><b data-v="spd">---</b><button data-f="spd+" data-r>▶</button></div>
       </div>
       <div class="warnbox"></div>
       <div class="objective" style="display:none"></div>
@@ -134,11 +146,52 @@ export class Game {
       if (a === 'pause') this.onPause?.();
       if (a === 'cam') { const order: CamMode[] = ['chase', 'cockpit', 'wing', 'tower', 'orbit']; this.camMode = order[(order.indexOf(this.camMode) + 1) % order.length]; b.textContent = '🎥 ' + CAM_NAMES[this.camMode]; this.orbit.dist = 0; }
       if (a === 'hud') { const v = this.hud.root.style.display === 'none'; this.hud.setVisible(v); this.controls.setVisible(true); }
+      if (a === 'ap') { const v = this.apPanel.style.display === 'none'; if (v && this.ac && !this.ap.on) { this.ap.hdg = Math.round(this.ac.hdg); this.ap.alt = Math.max(1000, Math.round(this.ac.alt / FT / 100) * 100); } if (v && this.ac && !this.ap.athr) this.ap.spd = Math.max(Math.round(this.ac.ias), Math.round(this.ac.vref() + 10)); this.apPanel.style.display = v ? '' : 'none'; b.classList.toggle('on', v || this.ap.on); this.refreshFcu(); }
       if (a === 'slow') { if (this.session?.mode !== 'free') return; this.timeScale = this.timeScale === 1 ? 0.5 : this.timeScale === 0.5 ? 0.25 : 1; b.textContent = this.timeScale + '×'; }
     }));
+    this.apPanel = o.querySelector('.fcu')!;
+    this.ap.onEvent = (msg, warn) => { this.message(msg, 2.5); if (warn) audio.masterCaution(); else audio.chime(); this.refreshFcu(); };
+    const fcuAct = (f: string, big: boolean) => {
+      const ac = this.ac; if (!ac) return;
+      const ap = this.ap;
+      if (f === 'ap') { if (ap.on) ap.disconnect('', false); else ap.engage(ac); }
+      if (f === 'athr') { if (ap.athr) { ap.athr = false; this.message('A/THR OFF', 2); } else ap.engageAthr(ac); }
+      if (f === 'app') {
+        if (ap.app) { ap.app = false; ap.locCap = ap.gsCap = false; ap.lat = 'HDG'; if (ap.vert === 'GS') { ap.vert = 'ALT'; ap.alt = Math.round(ac.alt / FT / 100) * 100; } }
+        else { if (!ap.on) ap.engage(ac); if (ap.on) { ap.app = true; this.message(this.hud.ils ? `APP: ${this.hud.ils.apt} ${this.hud.ils.ident} ILS` : 'APP kurulu — ILS bekleniyor', 2.5); } }
+      }
+      const step = (n: number) => big ? n * 5 : n;
+      if (f === 'hdg-' || f === 'hdg+') { ap.hdg = ((ap.hdg + (f.endsWith('+') ? 1 : -1) * step(1)) % 360 + 360) % 360; if (ap.lat === 'LOC') { ap.lat = 'HDG'; ap.locCap = false; ap.app = false; } }
+      if (f === 'alt-' || f === 'alt+') { ap.alt = clamp(ap.alt + (f.endsWith('+') ? 1 : -1) * step(100), 0, 41000); if (ap.vert === 'ALT' && ap.on && !ap.app) { ap.vert = 'VS'; ap.vs = ap.alt > ac.alt / FT ? 1500 : -1500; } }
+      if (f === 'vs-' || f === 'vs+') { ap.vs = clamp(ap.vs + (f.endsWith('+') ? 1 : -1) * 100, -4000, 4000); if (ap.vert !== 'GS') ap.vert = 'VS'; }
+      if (f === 'spd-' || f === 'spd+') ap.spd = clamp(ap.spd + (f.endsWith('+') ? 1 : -1) * step(1), 80, 350);
+      this.refreshFcu();
+    };
+    this.apPanel.querySelectorAll<HTMLButtonElement>('button[data-f]').forEach(b => {
+      const f = b.dataset.f!;
+      if (b.hasAttribute('data-r')) {
+        // press & hold repeats (accelerating)
+        let t: number | undefined, n = 0;
+        const stop = () => { clearTimeout(t); t = undefined; };
+        b.addEventListener('pointerdown', e => { e.preventDefault(); n = 0; const rep = () => { fcuAct(f, n > 6); n++; t = window.setTimeout(rep, n === 1 ? 380 : 90); }; rep(); });
+        b.addEventListener('pointerup', stop); b.addEventListener('pointercancel', stop); b.addEventListener('pointerleave', stop);
+      } else b.addEventListener('click', () => fcuAct(f, false));
+    });
+    this.fcuAct = fcuAct;
+  }
+  fcuAct: (f: string, big: boolean) => void = () => {};
+  refreshFcu() {
+    const ap = this.ap, p = this.apPanel; if (!p) return;
+    const set = (k: string, v: string) => { const e = p.querySelector(`[data-v="${k}"]`); if (e) e.textContent = v; };
+    set('hdg', ap.lat === 'LOC' ? 'LOC' : String(Math.round(ap.hdg)).padStart(3, '0'));
+    set('alt', String(ap.alt)); set('vs', ap.vert === 'VS' ? (ap.vs > 0 ? '+' : '') + ap.vs : ap.vert === 'GS' ? 'G/S' : '----'); set('spd', ap.athr ? String(ap.spd) : String(ap.spd) + '*');
+    p.querySelector('[data-f="ap"]')!.classList.toggle('on', ap.on);
+    p.querySelector('[data-f="athr"]')!.classList.toggle('on', ap.athr);
+    p.querySelector('[data-f="app"]')!.classList.toggle('on', ap.app);
+    this.overlay.querySelector('.ap-btn')?.classList.toggle('on', ap.on || this.apPanel.style.display !== 'none');
   }
   onPause: (() => void) | null = null;
-  setHudVisible(v: boolean) { this.overlay.style.display = v ? '' : 'none'; this.hud.setVisible(v); this.controls.setVisible(v); }
+  setHudVisible(v: boolean) { this.overlay.style.display = v ? '' : 'none'; this.hud.setVisible(v); this.controls.setVisible(v); if (v) requestAnimationFrame(() => this.hud.layout()); }
   message(t: string, sec = 4) { this.msgEl.textContent = t; this.msgTimer = sec; }
   objective(t: string | null) { this.objEl.style.display = t ? '' : 'none'; if (t) this.objEl.innerHTML = t; }
 
@@ -146,7 +199,10 @@ export class Game {
   async start(s: Session) {
     this.endFlight(true);
     this.session = s; this.ended = false;
-    this.weather = new Weather({ ...defaultWeather(), ...s.weather });
+    this.ap.reset(); this.hud.fma = ''; this.hud.fmaSel = '';
+    this.weather = new Weather({ ...defaultWeather(), ...this.varyWeather(s) });
+    const diff = store.settings.difficulty;
+    this.randomFail = diff === 'hard' && (s.mode === 'free' || s.mode === 'cargo') ? 90 + Math.random() * 420 : -1;
     this.world.sky.hour = this.weather.s.hour; this.world.sky.visibility = this.weather.s.visibility; this.world.sky.cloud = this.weather.s.cloud;
     const t = s.type;
     const events = { emit: (type: string, data?: any) => this.onEvent(type, data) };
@@ -253,6 +309,8 @@ export class Game {
     const ac = this.ac;
     if (ac && !this.paused) {
       this.controls.update(dt);
+      this.ap.update(ac, dt * this.timeScale, this.hud.ils);
+      if ((this.frameCount = (this.frameCount + 1) % 15) === 0) { this.hud.fma = this.ap.fma(); this.hud.fmaSel = this.ap.on || this.ap.athr ? `${this.ap.lat === 'HDG' ? 'HDG ' + String(Math.round(this.ap.hdg)).padStart(3, '0') : ''} ALT ${this.ap.alt}${this.ap.athr ? ' SPD ' + this.ap.spd : ''}` : ''; this.refreshFcu(); }
       const sdt = dt * this.timeScale;
       this.acc += sdt;
       const h = 1 / 120;
@@ -267,6 +325,7 @@ export class Game {
       this.callouts();
       this.recordReplay(sdt);
       this.checkEnd(sdt);
+      this.maybeFail();
       this.tutorial();
     }
     this.updateCamera(dt);
@@ -514,6 +573,36 @@ export class Game {
 
   // ------------------------------------------------------------------ end of flight
   private endTimer = 0;
+  /** realistic/hard: real-world-like variable wind, gusts and turbulence unless the scenario fixes them */
+  private varyWeather(s: Session): Partial<WeatherState> {
+    const w = { ...s.weather }, d = store.settings.difficulty;
+    if (d === 'easy' || s.mode === 'tutorial' || s.mode === 'emergency') return w;
+    const r = Math.random;
+    if (w.windDir === undefined) w.windDir = Math.round(r() * 36) * 10;
+    const base = w.windKt ?? 6;
+    if (d === 'hard') { w.windKt = base + 6 + r() * 12; w.gustKt = Math.max(w.gustKt ?? 0, 4 + r() * 8); w.turb = Math.max(w.turb ?? 0, 0.2 + r() * 0.15); }
+    else { w.windKt = base + r() * 6; if (w.windKt > 10) w.gustKt = Math.max(w.gustKt ?? 0, r() * 6); w.turb = Math.max(w.turb ?? 0, 0.08); }
+    w.windKt = Math.round(w.windKt); if (w.gustKt) w.gustKt = Math.round(w.gustKt);
+    return w;
+  }
+  private randomFail = -1;
+  /** hard mode: one random failure some minutes into the flight */
+  private maybeFail() {
+    const ac = this.ac!;
+    if (this.randomFail < 0 || this.flightTime < this.randomFail || ac.onGround || ac.ra / FT < 400) return;
+    this.randomFail = -1;
+    const opts: [string, () => void][] = [
+      ['Motor arızası!', () => { const e = ac.engines[Math.floor(Math.random() * ac.engines.length)]; e.failed = true; }],
+      ['Pitot buzlanması — hız göstergesi güvenilmez', () => { ac.sys.pitot = false; ac.iasDisplayed = ac.ias; }],
+      ['Hidrolik basınç kaybı', () => { ac.sys.hydraulics = false; }],
+      ['Yakıt kaçağı', () => { ac.sys.fuelLeak = 4; }],
+      ['Flaplar sıkıştı', () => { ac.sys.flapsJam = true; }],
+      ['İniş takımı arızası', () => { ac.sys.gearJam = true; }]
+    ];
+    const [msg, fn] = opts[Math.floor(Math.random() * opts.length)];
+    fn(); this.message('⚠ ' + msg, 5); audio.masterWarning();
+  }
+
   private checkEnd(dt: number) {
     const ac = this.ac!, s = this.session!;
     if (this.ended) return;

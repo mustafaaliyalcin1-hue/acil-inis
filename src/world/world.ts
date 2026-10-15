@@ -45,6 +45,7 @@ export class World {
     this.terrain.splitFactor = lvl === 'low' ? 1.35 : lvl === 'med' ? 1.9 : 2.5;
     this.terrain.maxZ = this.mode === 'online' ? (lvl === 'high' ? 16 : 15) : 15;
     this.tex.anisotropy = lvl === 'low' ? 2 : lvl === 'med' ? 4 : 8;
+    this.terrain.setBuildingDensity(!store.settings.buildings ? 0 : lvl === 'low' ? 0.35 : lvl === 'med' ? 0.6 : 1);
   }
 
   async init() {
@@ -120,8 +121,9 @@ export class World {
     return { h, water, flat };
   }
 
-  obstacles(x: number, z: number, r: number): Obstacle[] {
+  obstacles(x: number, z: number, r: number, y = -1e9): Obstacle[] {
     const out: Obstacle[] = [];
+    this.terrain.obstacles(x, z, r, y, out);
     for (const a of this.active.values()) {
       if (Math.abs(a.x - x) > 8000 || Math.abs(a.z - z) > 8000) continue;
       for (const o of a.obstacles) if (Math.abs(x - o.cx) < o.r + r && Math.abs(z - o.cz) < o.r + r) out.push(o);

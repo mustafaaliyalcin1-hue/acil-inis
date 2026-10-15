@@ -42,7 +42,7 @@ export class Screens {
     const e = h(`<div class="screen clear"><div class="menu-main">
       <div class="menu-logo"><h1>ACİL İNİŞ</h1><div class="sub">Gerçekçi yolcu uçağı uçuş ve acil iniş simülatörü</div>
         <div class="status">${st} <span class="tag">${online ? 'Online dünya' : 'Offline · Marmara'}</span>${c ? ` <span class="tag yel">Kariyer: ${money(c.money)}</span>` : ''}</div>
-        <div class="status" style="color:var(--muted);font-size:12px;margin-top:10px">${store.data.flights} uçuş · Zorluk: ${store.settings.difficulty === 'easy' ? 'Kolay' : 'Gerçekçi'}</div></div>
+        <div class="status" style="color:var(--muted);font-size:12px;margin-top:10px">${store.data.flights} uçuş · Zorluk: ${store.settings.difficulty === 'easy' ? 'Kolay' : store.settings.difficulty === 'hard' ? 'Zor' : 'Gerçekçi'}</div></div>
       <div class="menu-btns">
         <button class="mbtn" data-a="free"><span class="ico">🛫</span><div><b>Serbest Uçuş</b><span>İstediğin havalimanı, uçak ve hava · admin paneli</span></div></button>
         <button class="mbtn hi" data-a="emg"><span class="ico">🚨</span><div><b>Acil Durum</b><span>Motor arızası, süzülme, suya iniş · 23 senaryo</span></div></button>
@@ -345,10 +345,11 @@ export class Screens {
     field('Eğim hassasiyeti', rng('tiltSens', 0.4, 2, 0.05), c1);
     field('Joystick hassasiyeti', rng('stickSens', 0.4, 2, 0.05), c1);
     field('Yunuslama ters', this.seg([['0', 'Normal (çek = burun yukarı)'], ['1', 'Ters']], s.invertPitch ? '1' : '0', v => store.set('invertPitch', v === '1')), c1);
-    field('Zorluk', this.seg([['real', 'Gerçekçi'], ['easy', 'Kolay (stabilite asisti)']], s.difficulty, v => store.set('difficulty', v)), c1);
+    field('Zorluk', this.seg([['easy', 'Kolay'], ['real', 'Gerçekçi'], ['hard', 'Zor']], s.difficulty, v => store.set('difficulty', v)), c1);
     field('HUD boyutu', rng('hudScale', 0.7, 1.3, 0.05), c1);
     field('Ses seviyesi', rng('volume', 0, 1, 0.05), c2);
     field('Sesli anonslar (callout)', this.seg([['1', 'Açık'], ['0', 'Kapalı']], s.voice ? '1' : '0', v => store.set('voice', v === '1')), c2);
+    field('3D binalar (şehirler)', this.seg([['1', 'Açık'], ['0', 'Kapalı']], s.buildings ? '1' : '0', v => { store.set('buildings', v === '1'); this.game.world.applyQuality(); }), c2);
     field('Süzülme halkası (ND)', this.seg([['1', 'Açık'], ['0', 'Kapalı']], s.showGlideRing ? '1' : '0', v => store.set('showGlideRing', v === '1')), c2);
     field('Dünya', this.seg([['offline', 'Offline (Marmara paketi)'], ['online', 'Online (tüm dünya)']], s.worldMode, async v => {
       store.set('worldMode', v); this.toast(v === 'online' ? 'Online dünya: tile\'lar akıtılır, bağlantı koparsa önbellek kullanılır' : 'Offline mod'); await this.game.initWorld(v);
@@ -370,7 +371,7 @@ export class Screens {
     saveRow.querySelector<HTMLButtonElement>('#rst')!.onclick = () => { if (confirm('Tüm ayarlar, skorlar ve kariyer silinsin mi?')) { store.reset(); this.settings(back); } };
     field('Kayıt (ayarlar, skorlar, kariyer)', saveRow, c2);
     c2.appendChild(h(`<div class="sec">PC klavye kontrolleri</div>`));
-    c2.appendChild(h(`<div style="font-size:12px;color:var(--muted);line-height:1.6">Ok tuşları / WASD: yunuslama ve yatış (↓ = burun yukarı) · Q/E: dümen · PageUp/PageDown veya +/−: gaz · Home: TOGA · End: rölanti<br>F / V: flap aç / topla · G: iniş takımı · Boşluk veya B: fren · K: park freni · R: ters itki · / : spoiler · . : spoiler ARM<br>T / Y: trim · C: kamera · H: HUD · Esc / P: duraklat · Fare sürükle: kamera döndür · Tekerlek: yakınlaş</div>`));
+    c2.appendChild(h(`<div style="font-size:12px;color:var(--muted);line-height:1.6">Ok tuşları / WASD: yunuslama ve yatış (↓ = burun yukarı) · Q/E: dümen · PageUp/PageDown veya +/−: gaz · Home: TOGA · End: rölanti<br>F / V: flap aç / topla · G: iniş takımı · Boşluk veya B: fren · K: park freni · R: ters itki · / : spoiler · . : spoiler ARM<br>T / Y: trim · 1: otopilot · 2: oto-gaz (A/THR) · 3: ILS yaklaşma (APP) · C: kamera · H: HUD · Esc / P: duraklat · Fare sürükle: kamera döndür · Tekerlek: yakınlaş</div>`));
     c2.appendChild(h(`<div class="sec">Veri kaynakları ve atıflar</div>`));
     c2.appendChild(h(`<div style="font-size:12px;color:var(--muted);line-height:1.5">
       Uydu görüntüsü: Sentinel-2 cloudless 2024 — s2maps.eu, EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2024), CC BY-NC-SA 4.0<br>
@@ -383,12 +384,12 @@ export class Screens {
 
   // ---------------------------------------------------------------- pause
   pause(onResume: () => void, onRestart: () => void, onExit: () => void) {
-    const e = h(`<div class="screen clear" style="align-items:center;justify-content:center"><div class="card" style="min-width:300px;gap:10px;padding:18px">
+    const e = h(`<div class="screen clear" style="align-items:center;justify-content:center"><div class="card pause-card" style="min-width:300px;gap:10px;padding:18px">
       <h3 style="font-size:20px">Duraklatıldı</h3>
-      <button class="btn primary" data-a="r">Devam et</button><button class="btn" data-a="re">Yeniden başlat</button>
+      <div class="pgrid"><button class="btn primary" data-a="r">Devam et</button><button class="btn" data-a="re">Yeniden başlat</button>
       <button class="btn" data-a="c">Kontrol: ${store.settings.control === 'tilt' ? 'Eğim → Joystick' : 'Joystick → Eğim'}</button>
       <button class="btn" data-a="cal">Eğimi kalibre et</button>
-      <button class="btn danger" data-a="x">Menüye dön</button></div></div>`);
+      <button class="btn danger" data-a="x">Menüye dön</button></div></div></div>`);
     e.querySelectorAll<HTMLButtonElement>('[data-a]').forEach(b => b.onclick = async () => {
       const a = b.dataset.a;
       if (a === 'r') { this.close(); onResume(); }

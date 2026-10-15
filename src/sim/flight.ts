@@ -425,7 +425,7 @@ export class Aircraft {
       const pen = g.h - P.y;
       // obstacle (building) strikes for wingtips / fuselage
       if (!isGear && this.vel.length() > 8) {
-        for (const o of this.world.obstacles(P.x, P.z, 2)) {
+        for (const o of this.world.obstacles(P.x, P.z, 2, P.y)) {
           if (insideObstacle(o, P.x, P.y, P.z)) {
             if (ct.kind === 'tip') this.breakWing(ct.side, 'bina');
             else if (ct.kind !== 'eng') this.crash('Binaya çarpma');

@@ -7,6 +7,8 @@ import { env, fogGLSL } from './env';
 import { DemCache, TextureCache, Source } from './tiles';
 import type { FlatRect } from './airports';
 import { flatWeight } from './airports';
+import type { Obstacle } from './airports';
+import { makeBuildings, BuildingSet } from './buildings';
 
 const N = 32; // grid segments per tile
 
@@ -91,6 +93,7 @@ class Node {
   mesh: THREE.Mesh | null = null;
   building = false;
   texKey: [number, number, number] | null = null;
+  bld: (BuildingSet & { grid: Obstacle[][]; top: number }) | null = null;
   demZ = -1;
   imgZ = -1;
   dirty = false;
@@ -114,7 +117,9 @@ export class Terrain {
   splitFactor = 2.0;
   maxZ = 15;
   frame = 0;
-  stats = { nodes: 0, meshes: 0, tex: 0 };
+  stats = { nodes: 0, meshes: 0, tex: 0, buildings: 0 };
+  buildingDensity = 1; // 0 = off
+  private bldNodes = new Set<Node>();
   constructor(public host: TerrainHost, public src: Source, public dem: DemCache, public tex: TextureCache) {
     this.group.name = 'terrain';
   }
@@ -191,6 +196,7 @@ export class Terrain {
     this.stats.nodes = vis.size;
     this.stats.meshes = this.group.children.length;
     this.stats.tex = this.tex.size;
+    this.stats.buildings = [...this.bldNodes].reduce((a, n) => a + (n.mesh?.visible ? n.bld!.obstacles.length : 0), 0);
     if (this.frame % 120 === 0) this.tex.gc(this.stats.meshes + 80);
   }
 
@@ -238,6 +244,56 @@ export class Terrain {
       this.group.add(n.mesh);
     }
     n.demZ = dz; n.imgZ = iz; n.dirty = false;
+    if (n.bld) this.dropBuildings(n);
+    if (this.buildingDensity > 0 && n.z >= 14 && iz >= 14 && tex?.image) this.addBuildings(n, tex, geo);
+  }
+
+  private addBuildings(n: Node, tex: THREE.Texture, geo: THREE.BufferGeometry) {
+    const s = n.z - n.imgZ, k = 2 ** s;
+    const flats = this.host.flatAt(n.center.x, n.center.z).filter(f => Math.hypot(f.cx - n.center.x, f.cz - n.center.z) < n.size + f.halfL + 2000);
+    const set = makeBuildings({
+      z: n.z, x: n.x, y: n.y, center: n.center, proj: this.host.proj, img: tex.image as any,
+      uv: { k, ox: (n.x / k) - (n.x >> s), oy: (n.y / k) - (n.y >> s) },
+      pos: geo.attributes.position.array as Float32Array, water: geo.attributes.water.array as Float32Array, N, flats, density: this.buildingDensity
+    });
+    if (!set || !n.mesh) return;
+    n.mesh.add(set.mesh);
+    // 8×8 bucket grid for collision queries
+    const grid: Obstacle[][] = Array.from({ length: 64 }, () => []);
+    let top = -1e9;
+    const x0 = n.center.x - n.size / 2, z0 = n.center.z - n.size / 2, cs = n.size / 8;
+    for (const o of set.obstacles) {
+      top = Math.max(top, o.y1);
+      const i0 = Math.max(0, Math.floor((o.cx - o.r - x0) / cs)), i1 = Math.min(7, Math.floor((o.cx + o.r - x0) / cs));
+      const j0 = Math.max(0, Math.floor((o.cz - o.r - z0) / cs)), j1 = Math.min(7, Math.floor((o.cz + o.r - z0) / cs));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) grid[j * 8 + i].push(o);
+    }
+    n.bld = { ...set, grid, top };
+    this.bldNodes.add(n);
+  }
+  private dropBuildings(n: Node) {
+    if (!n.bld) return;
+    n.bld.mesh.removeFromParent(); n.bld.mesh.dispose();
+    n.bld = null; this.bldNodes.delete(n);
+  }
+  /** building obstacles near (x, z) from the finest loaded tile */
+  obstacles(x: number, z: number, r: number, y: number, out: Obstacle[]) {
+    let best: Node | null = null;
+    for (const n of this.bldNodes) {
+      if (Math.abs(x - n.center.x) > n.size / 2 || Math.abs(z - n.center.z) > n.size / 2) continue;
+      if (!best || n.z > best.z) best = n;
+    }
+    if (!best || !best.bld || y > best.bld.top + r) return;
+    const cs = best.size / 8, x0 = best.center.x - best.size / 2, z0 = best.center.z - best.size / 2;
+    const i = Math.min(7, Math.max(0, Math.floor((x - x0) / cs))), j = Math.min(7, Math.max(0, Math.floor((z - z0) / cs)));
+    for (const o of best.bld.grid[j * 8 + i]) if (Math.abs(x - o.cx) < o.r + r && Math.abs(z - o.cz) < o.r + r) out.push(o);
+  }
+  setBuildingDensity(d: number) {
+    if (d === this.buildingDensity) return;
+    this.buildingDensity = d;
+    for (const n of [...this.bldNodes]) this.dropBuildings(n);
+    const mark = (n: Node) => { if (n.mesh && n.z >= 14) n.dirty = true; n.children?.forEach(mark); };
+    this.roots.forEach(mark);
   }
   private isDisposed(n: Node): boolean {
     let p: Node | null = n;
@@ -329,6 +385,7 @@ export class Terrain {
   private disposeTree(n: Node) {
     if (n.children) for (const c of n.children) this.disposeTree(c);
     n.children = null;
+    if (n.bld) this.dropBuildings(n);
     if (n.mesh) {
       this.group.remove(n.mesh);
       n.mesh.geometry.dispose();

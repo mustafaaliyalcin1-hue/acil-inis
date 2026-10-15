@@ -64,6 +64,9 @@ export class Controls {
     if (k === 'c') return this.onKeyAction('cam');
     if (k === 'escape' || k === 'p') return this.onKeyAction('pause');
     if (k === 'h') return this.onKeyAction('hud');
+    if (k === '1') return this.onKeyAction('fcu:ap');
+    if (k === '2') return this.onKeyAction('fcu:athr');
+    if (k === '3') return this.onKeyAction('fcu:app');
     if (!ac) return;
     const n = ac.flapCount;
     if (k === 'f') ac.ctl.flapIdx = Math.min(n - 1, ac.ctl.flapIdx + 1);
@@ -114,14 +117,14 @@ export class Controls {
         const m = Math.hypot(dx, dy), k = m > 1 ? 1 / m : 1;
         this.stickX = dx * k; this.stickY = dy * k;
       }
-      this.knob.style.transform = `translate(${this.stickX * 46}px, ${this.stickY * 46}px)`;
+      const kr = this.stick.clientWidth * 0.31; this.knob.style.transform = `translate(${this.stickX * kr}px, ${this.stickY * kr}px)`;
     });
     // rudder
     this.rud = el('div', 'rudder ia', '<div class="lbl">DÜMEN</div>'); this.rudKnob = el('div', 'knob'); this.rud.appendChild(this.rudKnob);
     drag(this.rud, (x, _y, ph) => {
       if (ph === 'end') this.rudder = 0;
       else { const r = this.rud.getBoundingClientRect(); this.rudder = clamp((x - (r.left + r.width / 2)) / (r.width / 2 - 15), -1, 1); }
-      this.rudKnob.style.transform = `translateX(${this.rudder * 48}px)`;
+      this.rudKnob.style.transform = `translateX(${this.rudder * (this.rud.clientWidth / 2 - 18)}px)`;
     });
     // levers
     const levers = el('div', 'levers');
@@ -134,7 +137,6 @@ export class Controls {
     this.flapTicks = el('div', 'ticks'); this.flap.appendChild(this.flapTicks);
     this.flapHandle = el('div', 'handle', '0'); this.flap.appendChild(this.flapHandle);
     this.gear = el('div', 'lever gear ia', '<div class="lbl">GEAR</div><div class="track"></div><div class="ticks"><span>UP</span><span></span><span>DN</span></div>');
-    this.gear.style.width = '50px'; this.gear.style.height = '120px';
     this.gearHandle = el('div', 'handle'); this.gear.appendChild(this.gearHandle);
     this.thr = el('div', 'lever thr ia', '<div class="lbl">GAZ</div><div class="track"></div><div class="ticks"><span>TOGA</span><span>CL</span><span></span><span>IDLE</span></div>');
     levers.append(col, this.spd, this.flap, this.gear, this.thr);
